@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wwks2-ads-gateway"
+version = "0.1.0"
+description = "A bridge between WWKS2 WebSockets and TwinCAT ADS"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pyads",
+    "fastapi",
+    "uvicorn",
+    "websockets",
+    "tomli; python_version < '3.11'",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/MT-TISI/wwks2-ads-gateway"
