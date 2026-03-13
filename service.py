@@ -1,3 +1,4 @@
+import ctypes
 import xml.etree.ElementTree as ET
 import asyncio
 import websockets
@@ -7,7 +8,7 @@ import logging
 import pyads
 import os
 import sys
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 import uvicorn
 import logging
@@ -123,7 +124,6 @@ class PLCInterfaceADS:
         system_state["last_delivery_ok"] = False
         self._pulse(PLC_VAR_DELIVERY_ERROR)
 
-
 # ------------------------------------------------------------------------------
 # WWKS2 PARSER
 # ------------------------------------------------------------------------------
@@ -142,7 +142,6 @@ class WWKS2Parser:
             return {"type": msg_type, "attributes": attrs, "element": child}
 
         return {"type": "Unknown"}
-
 
 # ------------------------------------------------------------------------------
 # CORE LOGIC
@@ -226,7 +225,6 @@ class WWKS2SignalEngine:
             logger.info(f"pulse_delivered_error")
             self.plc.pulse_delivered_error()
 
-
 # ------------------------------------------------------------------------------
 # WEBSOCKET CLIENT WRAPPER (Start/Stop)
 # ------------------------------------------------------------------------------
@@ -248,20 +246,28 @@ class WWKS2ClientThread(threading.Thread):
         self.loop.run_until_complete(self.async_run())
 
     async def async_run(self):
-        system_state["ws_server_running"] = True  # Keeping key name to avoid frontend breaks, means client is active
+        # ws_server_running is used by the frontend to show connection status
         self.stop_event = asyncio.Event()
         uri = f"ws://{WWKS2_LISTEN_IP}:{WWKS2_LISTEN_PORT}"
         logger.info(f"[WS] WWKS2 websocket client started, connecting to {uri}")
         
         while not self.stop_event.is_set():
             try:
+                # Set to False before attempting connection
+                system_state["ws_server_running"] = False
                 async with websockets.connect(uri) as websocket:
+                    # Successfully connected
+                    system_state["ws_server_running"] = True
                     logger.info(f"[WS] Connected to {uri}")
                     await self.handle_connection(websocket)
+                    # If handle_connection returns normally, it means connection was closed gracefully
+                    system_state["ws_server_running"] = False
             except websockets.exceptions.ConnectionClosed:
+                system_state["ws_server_running"] = False
                 logger.warning(f"[WS] Connection closed, retrying in 5 seconds...")
                 await asyncio.sleep(5)
             except Exception as ex:
+                system_state["ws_server_running"] = False
                 logger.error(f"[WS] Connection error: {ex}, retrying in 5 seconds...")
                 await asyncio.sleep(5)
                 
@@ -341,33 +347,183 @@ controller = ServiceController(plc)
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard():
-    html = f"""
+    html = """
     <html>
     <head>
         <title>WWKS2 Gateway</title>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
         <style>
-            body {{ font-family: Arial; margin: 40px; }}
-            .status-box {{ padding: 20px; border: 1px solid #ddd; width: 400px; }}
-            button {{ padding: 10px 20px; margin: 5px; }}
+            :root {
+                --bg: #0f172a;
+                --card-bg: rgba(30, 41, 59, 0.7);
+                --text: #f8fafc;
+                --primary: #38bdf8;
+                --success: #22c55e;
+                --error: #ef4444;
+                --warning: #f59e0b;
+                --border: rgba(255, 255, 255, 0.1);
+            }
+            body { 
+                font-family: 'Inter', sans-serif; 
+                margin: 0; 
+                display: flex; 
+                justify-content: center; 
+                align-items: center; 
+                min-height: 100vh;
+                background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+                color: var(--text);
+            }
+            .container {
+                width: 100%;
+                max-width: 500px;
+                padding: 20px;
+            }
+            .card {
+                background: var(--card-bg);
+                backdrop-filter: blur(12px);
+                border: 1px solid var(--border);
+                border-radius: 24px;
+                padding: 32px;
+                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            }
+            h1 { 
+                font-size: 24px; 
+                margin-bottom: 24px; 
+                text-align: center;
+                background: linear-gradient(to right, #38bdf8, #818cf8);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                font-weight: 700;
+            }
+            .status-list {
+                list-style: none;
+                padding: 0;
+                margin: 0 0 24px 0;
+            }
+            .status-item {
+                display: flex;
+                justify-content: space-between;
+                padding: 12px 0;
+                border-bottom: 1px solid var(--border);
+                transition: all 0.3s ease;
+            }
+            .status-item:last-child { border-bottom: none; }
+            .label { opacity: 0.7; font-size: 14px; }
+            .value { font-weight: 600; font-size: 14px; }
+            
+            .state-true { color: var(--success); }
+            .state-false { color: var(--error); }
+            .state-null { color: #94a3b8; }
+            .state-active { color: var(--primary); }
+
+            .controls {
+                display: flex;
+                gap: 12px;
+            }
+            button {
+                flex: 1;
+                padding: 12px;
+                border-radius: 12px;
+                border: none;
+                font-weight: 600;
+                cursor: pointer;
+                transition: transform 0.2s, background 0.2s;
+            }
+            button:hover { transform: translateY(-2px); }
+            button:active { transform: translateY(0); }
+            .btn-start { background: var(--success); color: white; }
+            .btn-stop { background: var(--error); color: white; }
+            
+            #last_msg_type { color: var(--primary); }
+            
+            .badge {
+                padding: 2px 8px;
+                border-radius: 12px;
+                font-size: 11px;
+                background: rgba(255,255,255,0.1);
+            }
         </style>
     </head>
     <body>
-        <h1>WWKS2 → PLC Gateway Dashboard</h1>
+        <div class="container">
+            <div class="card">
+                <h1>WWKS2 Gateway</h1>
 
-        <div class="status-box">
-            <p><b>WebSocket Client Active:</b> {system_state['ws_server_running']}</p>
-            <p><b>Last Message:</b> {system_state['last_message_type']}</p>
-            <p><b>Robot Active:</b> {system_state['robot_active']}</p>
-            <p><b>Last Delivery OK:</b> {system_state['last_delivery_ok']}</p>
-            <p><b>ADS Connected:</b> {system_state['ads_connected']}</p>
+                <div class="status-list">
+                    <div class="status-item">
+                        <span class="label">Client Connection</span>
+                        <span id="ws_active" class="value badge">Checking...</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">PLC Connection (ADS)</span>
+                        <span id="ads_connected" class="value badge">Checking...</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Robot Status</span>
+                        <span id="robot_active" class="value">Checking...</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Last Message</span>
+                        <span id="last_msg_type" class="value">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Last Delivery Result</span>
+                        <span id="last_delivery_ok" class="value">None</span>
+                    </div>
+                </div>
 
-            <form action="/start" method="post">
-                <button style="background:lightgreen;">Start Client</button>
-            </form>
-            <form action="/stop" method="post">
-                <button style="background:salmon;">Stop Client</button>
-            </form>
+                <div class="controls">
+                    <form action="/start" method="post" style="flex:1">
+                        <button class="btn-start">Start Client</button>
+                    </form>
+                    <form action="/stop" method="post" style="flex:1">
+                        <button class="btn-stop">Stop Client</button>
+                    </form>
+                </div>
+            </div>
         </div>
+
+        <script>
+            async function updateStatus() {
+                try {
+                    const response = await fetch('/status');
+                    const data = await response.json();
+                    
+                    const wsEl = document.getElementById('ws_active');
+                    wsEl.innerText = data.ws_server_running ? 'CONNECTED' : 'DISCONNECTED';
+                    wsEl.className = 'value badge ' + (data.ws_server_running ? 'state-true' : 'state-false');
+
+                    const adsEl = document.getElementById('ads_connected');
+                    adsEl.innerText = data.ads_connected ? 'OK' : 'ERROR';
+                    adsEl.className = 'value badge ' + (data.ads_connected ? 'state-true' : 'state-false');
+
+                    const robotEl = document.getElementById('robot_active');
+                    robotEl.innerText = data.robot_active ? 'READY' : 'NOT READY';
+                    robotEl.className = 'value ' + (data.robot_active ? 'state-true' : 'state-false');
+
+                    document.getElementById('last_msg_type').innerText = data.last_message_type || '-';
+
+                    const deliveryEl = document.getElementById('last_delivery_ok');
+                    if (data.last_delivery_ok === true) {
+                        deliveryEl.innerText = 'SUCCESS';
+                        deliveryEl.className = 'value state-true';
+                    } else if (data.last_delivery_ok === false) {
+                        deliveryEl.innerText = 'ERROR';
+                        deliveryEl.className = 'value state-false';
+                    } else {
+                        deliveryEl.innerText = 'NONE';
+                        deliveryEl.className = 'value state-null';
+                    }
+
+                } catch (err) {
+                    console.error('Failed to update status:', err);
+                }
+            }
+
+            // Update every second
+            setInterval(updateStatus, 1000);
+            updateStatus(); // Initial call
+        </script>
     </body>
     </html>
     """
