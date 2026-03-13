@@ -21,14 +21,8 @@ python -m venv .venv
 
 ### 2. Activate the Virtual Environment
 
-On Windows:
 ```powershell
 .\.venv\Scripts\Activate.ps1
-```
-
-On Linux/macOS:
-```bash
-source .venv/bin/activate
 ```
 
 ### 3. Install Dependencies
@@ -51,4 +45,4 @@ Once dependencies are installed, you can start the service by running:
 python service.py
 ```
 
-The web dashboard will be available at `http://localhost:8080`.
+The web dashboard will be available at `http://localhost:8080`.
