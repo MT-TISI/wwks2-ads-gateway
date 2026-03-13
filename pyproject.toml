@@ -14,6 +14,7 @@ dependencies = [
     "uvicorn",
     "websockets",
     "tomli; python_version < '3.11'",
+    "pyinstaller",
 ]
 
 [project.urls]

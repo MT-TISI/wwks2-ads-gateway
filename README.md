@@ -46,3 +46,23 @@ python service.py
 ```
 
 The web dashboard will be available at `http://localhost:8080`.
+
+## Building for Production (EXE)
+
+To create a standalone executable for Windows, you can use PyInstaller.
+
+### 1. Install PyInstaller
+
+If not already installed via `requirements.txt`:
+```powershell
+pip install pyinstaller
+```
+
+### 2. Run the Build
+
+Use the provided `.spec` file to create the build:
+```powershell
+pyinstaller wwks2-ads-gateway.spec
+```
+
+The resulting executable will be located in the `dist/` directory.

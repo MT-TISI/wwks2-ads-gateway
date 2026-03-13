@@ -3,3 +3,4 @@ uvicorn
 websockets
 fastapi
 tomli; python_version < '3.11'
+pyinstaller
