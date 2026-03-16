@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import ssl
 import sys
 import threading
 import time
@@ -40,8 +41,10 @@ logger.propagate = False
 # DEFAULT CONFIG
 # ------------------------------------------------------------------------------
 
-WWKS2_LISTEN_IP = "0.0.0.0"
-WWKS2_LISTEN_PORT = 6050
+WWKS2_LISTEN_IP = "127.0.0.1"
+# 60500 on server
+WWKS2_LISTEN_PORT = 6050  
+WWKS2_USE_SSL = False
 PULSE_TIME = 0.1
 
 ADS_AMS_NET_ID = "127.0.0.1.1.1"
@@ -63,6 +66,7 @@ def get_base_dir() -> str:
 def load_config():
     global WWKS2_LISTEN_IP
     global WWKS2_LISTEN_PORT
+    global WWKS2_USE_SSL
     global PULSE_TIME
     global ADS_AMS_NET_ID
     global ADS_PORT
@@ -89,6 +93,7 @@ def load_config():
 
         WWKS2_LISTEN_IP = config.get("WWKS2_LISTEN_IP", WWKS2_LISTEN_IP)
         WWKS2_LISTEN_PORT = config.get("WWKS2_LISTEN_PORT", WWKS2_LISTEN_PORT)
+        WWKS2_USE_SSL = config.get("WWKS2_USE_SSL", WWKS2_USE_SSL)
         PULSE_TIME = config.get("PULSE_TIME", PULSE_TIME)
 
         ADS_AMS_NET_ID = config.get("ADS_AMS_NET_ID", ADS_AMS_NET_ID)
@@ -339,14 +344,23 @@ class WWKS2ClientThread(threading.Thread):
 
     async def async_run(self):
         self.stop_event = asyncio.Event()
-        uri = f"ws://{WWKS2_LISTEN_IP}:{WWKS2_LISTEN_PORT}"
+        
+        protocol = "wss" if WWKS2_USE_SSL else "ws"
+        uri = f"{protocol}://{WWKS2_LISTEN_IP}:{WWKS2_LISTEN_PORT}"
+        
+        ssl_context = None
+        if WWKS2_USE_SSL:
+            # Create an unverified SSL context to support self-signed certificates
+            ssl_context = ssl._create_unverified_context()
+            logger.info("[WS] SSL enabled (unverified context for self-signed certificates)")
+
         logger.info(f"[WS] WWKS2 websocket client started, connecting to {uri}")
 
         while not self.stop_event.is_set():
             try:
                 self.state.update(ws_connected=False)
 
-                async with websockets.connect(uri) as websocket:
+                async with websockets.connect(uri, ssl=ssl_context) as websocket:
                     self.state.update(ws_connected=True)
                     logger.info(f"[WS] Connected to {uri}")
 
